@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Welcomes the user and explains the new, robust workflow."""
     await update.message.reply_text(
-        "👋 Hello! I'm your personal watcher bot.\n\n"
+        "👋 Hello! I'm EchoBot, your personal watcher bot.\n\n"
         "I help you forward messages from specific users to a chat of your choice. Here's how to use me:\n\n"
         "1️⃣ **Set Your Destination:** Add me to the group or channel where you want to receive alerts, and run `/set_destination` there.\n\n"
         "2️⃣ **Get IDs:** Add me to the source group (where the user you want to watch is). Reply to any of their messages with the command `/get_id`.\n\n"
@@ -60,11 +60,7 @@ async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     target_user = update.message.reply_to_message.from_user
     source_chat = update.message.chat
-    
-    # ========================= THE FINAL FIX IS HERE =========================
-    # Switched from MARKDOWN_V2 to HTML for robust parsing.
-    # <b> for bold, <code> for code (copy-paste friendly).
-    # HTML does not have issues with special characters like '!', '()', or '-'.
+
     message = (
         f"✅ IDs Acquired\n\n"
         f"👤 <b>User:</b> @{target_user.username or target_user.first_name} (<code>{target_user.id}</code>)\n"

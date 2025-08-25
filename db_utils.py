@@ -1,5 +1,3 @@
-# db_utils.py
-
 import sqlite3
 
 DB_FILE = "multi_user_bot.db"
