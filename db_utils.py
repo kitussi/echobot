@@ -3,25 +3,19 @@ import sqlite3
 DB_FILE = "multi_user_bot.db"
 
 def get_db_connection():
-    """Crea y devuelve una conexión a la base de datos."""
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
 def create_tables():
-    """Crea las tablas de la base de datos si no existen."""
     conn = get_db_connection()
     cursor = conn.cursor()
-
-    # Tabla para guardar la configuración de cada usuario (su chat de destino)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS user_settings (
         user_id INTEGER PRIMARY KEY,
         destination_chat_id TEXT NOT NULL
     )
     """)
-
-    # Tabla para usuarios y grupos vigilados, vinculada al usuario que vigila
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS watched_targets (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,15 +26,24 @@ def create_tables():
         UNIQUE(watcher_user_id, source_group_id, target_user_id)
     )
     """)
-
+    
+    # --- NUEVA TABLA PARA FILTROS ---
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS filters (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        target_id INTEGER NOT NULL,
+        filter_type TEXT NOT NULL, -- 'keyword_include', 'keyword_exclude', 'content_type'
+        filter_value TEXT NOT NULL,
+        FOREIGN KEY (target_id) REFERENCES watched_targets (id) ON DELETE CASCADE
+    )
+    """)
+    
     conn.commit()
     conn.close()
-    print("✅ Base de datos multiusuario lista.")
+    print("✅ Base de datos con filtros lista.")
 
-# --- Funciones de configuración de usuario ---
-
+# --- Funciones de Configuración de Usuario (sin cambios) ---
 def set_user_destination(user_id: int, destination_chat_id: str):
-    """Guarda o actualiza el chat de destino para un usuario específico."""
     conn = get_db_connection()
     conn.execute(
         "INSERT INTO user_settings (user_id, destination_chat_id) VALUES (?, ?) "
@@ -51,16 +54,13 @@ def set_user_destination(user_id: int, destination_chat_id: str):
     conn.close()
 
 def get_user_destination(user_id: int) -> str | None:
-    """Obtiene el chat de destino de un usuario."""
     conn = get_db_connection()
     row = conn.execute("SELECT destination_chat_id FROM user_settings WHERE user_id = ?", (user_id,)).fetchone()
     conn.close()
     return row['destination_chat_id'] if row else None
 
-# --- Funciones de la lista de vigilancia ---
-
+# --- Funciones de Vigilancia (con una nueva función) ---
 def add_watched_target(watcher_user_id: int, source_group_id: str, target_user_id: int, target_username: str) -> bool:
-    """Añade un objetivo a la lista de vigilancia de un usuario."""
     try:
         conn = get_db_connection()
         conn.execute(
@@ -71,35 +71,71 @@ def add_watched_target(watcher_user_id: int, source_group_id: str, target_user_i
         conn.close()
         return True
     except sqlite3.IntegrityError:
-        return False # Ya existía
+        return False
 
-def remove_watched_target(watcher_user_id: int, target_user_id: int, source_group_id: str) -> bool:
-    """Elimina un objetivo de la lista de vigilancia de un usuario."""
+def remove_watched_target_by_id(target_id: int) -> bool:
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute(
-        "DELETE FROM watched_targets WHERE watcher_user_id = ? AND target_user_id = ? AND source_group_id = ?",
-        (watcher_user_id, target_user_id, source_group_id)
-    )
+    cursor.execute("DELETE FROM watched_targets WHERE id = ?", (target_id,))
     changes = cursor.rowcount
     conn.commit()
     conn.close()
     return changes > 0
 
 def get_user_watched_targets(watcher_user_id: int) -> list:
-    """Obtiene toda la lista de objetivos de un usuario."""
     conn = get_db_connection()
-    targets = conn.execute("SELECT source_group_id, target_user_id, target_username FROM watched_targets WHERE watcher_user_id = ?", (watcher_user_id,)).fetchall()
+    # Obtenemos el ID del objetivo, que es crucial para los filtros
+    targets = conn.execute("SELECT id, source_group_id, target_user_id, target_username FROM watched_targets WHERE watcher_user_id = ?", (watcher_user_id,)).fetchall()
     conn.close()
     return targets
 
 def find_watchers_for_target(source_group_id: str, target_user_id: int) -> list:
-    """Encuentra todos los usuarios que están vigilando a un objetivo específico en un grupo."""
     conn = get_db_connection()
+    # Devolvemos más información: el ID del objetivo y el ID del vigilante
     watchers = conn.execute(
-        "SELECT watcher_user_id FROM watched_targets WHERE source_group_id = ? AND target_user_id = ?",
-        (source_group_id, target_user_id)
+        "SELECT id, watcher_user_id FROM watched_targets WHERE source_group_id = ? AND target_user_id = ?",
+        (source_group_id, str(target_user_id))
     ).fetchall()
     conn.close()
-    # Devuelve una lista de IDs de los vigilantes
-    return [row['watcher_user_id'] for row in watchers]
+    return watchers
+
+# --- NUEVAS FUNCIONES PARA GESTIONAR FILTROS ---
+
+def add_filter(target_id: int, filter_type: str, filter_value: str):
+    conn = get_db_connection()
+    conn.execute(
+        "INSERT INTO filters (target_id, filter_type, filter_value) VALUES (?, ?, ?)",
+        (target_id, filter_type, filter_value)
+    )
+    conn.commit()
+    conn.close()
+
+def get_filters_for_target(target_id: int) -> list:
+    conn = get_db_connection()
+    filters_list = conn.execute("SELECT id, filter_type, filter_value FROM filters WHERE target_id = ?", (target_id,)).fetchall()
+    conn.close()
+    return filters_list
+
+def remove_filter_by_id(filter_id: int):
+    conn = get_db_connection()
+    conn.execute("DELETE FROM filters WHERE id = ?", (filter_id,))
+    conn.commit()
+    conn.close()
+
+def remove_user_destination(user_id: int):
+    conn = get_db_connection()
+    conn.execute("DELETE FROM user_settings WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+def update_migrated_group_id(old_group_id: str, new_group_id: str):
+    """Updates all occurrences of an old group ID to a new one after a migration."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE watched_targets SET source_group_id = ? WHERE source_group_id = ?",
+        (new_group_id, old_group_id)
+    )
+    conn.commit()
+    conn.close()
+    print(f"Database updated: Group ID {old_group_id} migrated to {new_group_id}")
