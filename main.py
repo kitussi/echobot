@@ -1,5 +1,3 @@
-# main.py (Version 5.3 - Final Verified Fix)
-
 import logging
 import re
 import base58
@@ -330,11 +328,9 @@ async def delete_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Deletes a specific filter from the database and refreshes the menu."""
     query = update.callback_query
     await query.answer()
-    # Correctly unpacks the callback_data: "delete_filter:FILTER_ID:TARGET_ID"
     _, filter_id, target_id_str = query.data.split(':')
     target_id = int(target_id_str)
     db_utils.remove_filter_by_id(int(filter_id))
-    # Correct way to refresh: call the menu-building function directly
     await manage_filters_menu(query, context, target_id)
 
 async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
