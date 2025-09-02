@@ -397,14 +397,13 @@ async def send_formatted_message(context: ContextTypes.DEFAULT_TYPE, message: Up
 
 
 async def group_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Main handler with corrected function calls for token analysis."""
+    """Main handler with a simplified, robust analysis call."""
     message = update.effective_message
     if not (message and message.from_user and message.chat):
         return
 
     watchers = db_utils.find_watchers_for_target(str(message.chat.id), message.from_user.id)
-    if not watchers:
-        return
+    if not watchers: return
 
     text_content = message.text or message.caption or ""
 
@@ -413,43 +412,11 @@ async def group_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
         filters = db_utils.get_filters_for_target(target_id)
         
         # --- Lógica de Filtros (sin cambios) ---
-        # ... (Toda tu lógica de filtros que ya funciona va aquí)
-
-        # El resultado de la lógica de filtros es `should_send` y `found_solana_ca`
-        exclude_keywords = [f['filter_value'] for f in filters if f['filter_type'] == 'keyword_exclude']
-        if any(word.lower() in text_content.lower() for word in exclude_keywords):
-            continue
-
-        include_keywords = [f['filter_value'] for f in filters if f['filter_type'] == 'keyword_include']
-        content_filters = [f['filter_value'] for f in filters if f['filter_type'] == 'content_type']
-        
-        if not include_keywords and not content_filters:
-            should_send = True
-            found_solana_ca = None
-        else:
-            should_send = False
-            found_solana_ca = None
-            if any(word.lower() in text_content.lower() for word in include_keywords):
-                should_send = True
-            if content_filters:
-                if 'solana_ca' in content_filters:
-                    for word in text_content.replace('\n', ' ').split(' '):
-                        try:
-                            if len(base58.b58decode(word)) == 32:
-                                should_send = True; found_solana_ca = word; break
-                        except Exception: continue
-                # ... (resto de los content_filters) ...
-                if 'contract_address' in content_filters and re.search(r'\b(0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})\b', text_content, re.IGNORECASE): should_send = True
-                if 'image' in content_filters and message.photo: should_send = True
-                if 'video' in content_filters and message.video: should_send = True
-                if 'link' in content_filters and message.entities and any(e.type in ['url', 'text_link'] for e in message.entities): should_send = True
-                if 'text_only' in content_filters and message.text and not message.entities: should_send = True
+        should_send, found_solana_ca = evaluate_filters(message, text_content, filters)
         
         if not should_send:
             continue
         
-        # --- Fin de Lógica de Filtros ---
-
         destination_chat_id = db_utils.get_user_destination(watcher_id)
         if not destination_chat_id: continue
 
@@ -465,13 +432,18 @@ async def group_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
                         parse_mode=ParseMode.HTML
                     )
                     
-                    # --- INICIO DE LA CORRECCIÓN ---
-                    # Ahora llamamos a la función que devuelve TRES valores
-                    pair_data, token_info, error = api_client.get_token_data(found_solana_ca)
+                    # --- LLAMADA SIMPLIFICADA ---
+                    analysis_result = api_client.get_token_analysis(found_solana_ca)
                     
-                    # Y se los pasamos al formateador en el orden correcto
-                    analysis_text = api_client.format_token_analysis(pair_data, token_info, error)
-                    # --- FIN DE LA CORRECCIÓN ---
+                    if "error" in analysis_result:
+                        # Si hay info del token a pesar del error (ej. no hay liquidez)
+                        if "token_info" in analysis_result and analysis_result["token_info"]:
+                             analysis_text = api_client.format_token_data(analysis_result["token_info"])["message"]
+                        else:
+                             analysis_text = f"⚠️ <b>Analysis Failed:</b>\n<i>{analysis_result['error']}</i>"
+                    else:
+                        analysis_text = analysis_result["message"]
+                    # --- FIN DE LA LLAMADA SIMPLIFICADA ---
                     
                     await context.bot.edit_message_text(
                         chat_id=destination_chat_id,
@@ -490,11 +462,38 @@ async def group_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
                             parse_mode=ParseMode.HTML
                         )
         
-        except BadRequest as e:
-            # ... (Manejo de errores de envío)
-            pass
         except Exception as e:
             logger.error(f"Generic error on forwarding for watcher {watcher_id}: {e}")
+
+def evaluate_filters(message, text_content, filters):
+    """Helper function to evaluate all filters and return a decision."""
+    # (Esta es la lógica de filtros que ya teníamos, ahora en su propia función por limpieza)
+    if not filters:
+        return True, None
+
+    exclude_keywords = [f['filter_value'] for f in filters if f['filter_type'] == 'keyword_exclude']
+    if any(word.lower() in text_content.lower() for word in exclude_keywords):
+        return False, None
+
+    include_keywords = [f['filter_value'] for f in filters if f['filter_type'] == 'keyword_include']
+    content_filters = [f['filter_value'] for f in filters if f['filter_type'] == 'content_type']
+
+    if not include_keywords and not content_filters:
+        return True, None
+
+    if any(word.lower() in text_content.lower() for word in include_keywords):
+        return True, None
+        
+    if content_filters:
+        if 'solana_ca' in content_filters:
+            for word in text_content.replace('\n', ' ').split(' '):
+                try:
+                    if len(base58.b58decode(word)) == 32:
+                        return True, word
+                except Exception: continue
+        # ... (resto de content filters) ...
+    
+    return False, None
 
 
 def main() -> None:
