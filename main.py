@@ -411,7 +411,6 @@ async def group_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
         target_id, watcher_id = watch['id'], watch['watcher_user_id']
         filters = db_utils.get_filters_for_target(target_id)
         
-        # --- Lógica de Filtros (sin cambios) ---
         should_send, found_solana_ca = evaluate_filters(message, text_content, filters)
         
         if not should_send:
@@ -432,18 +431,9 @@ async def group_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
                         parse_mode=ParseMode.HTML
                     )
                     
-                    # --- LLAMADA SIMPLIFICADA ---
+                    # --- LLAMADA SIMPLIFICADA Y CORREGIDA ---
                     analysis_result = api_client.get_token_analysis(found_solana_ca)
-                    
-                    if "error" in analysis_result:
-                        # Si hay info del token a pesar del error (ej. no hay liquidez)
-                        if "token_info" in analysis_result and analysis_result["token_info"]:
-                             analysis_text = api_client.format_token_data(analysis_result["token_info"])["message"]
-                        else:
-                             analysis_text = f"⚠️ <b>Analysis Failed:</b>\n<i>{analysis_result['error']}</i>"
-                    else:
-                        analysis_text = analysis_result["message"]
-                    # --- FIN DE LA LLAMADA SIMPLIFICADA ---
+                    analysis_text = api_client.format_token_analysis(analysis_result)
                     
                     await context.bot.edit_message_text(
                         chat_id=destination_chat_id,
@@ -464,36 +454,6 @@ async def group_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
         
         except Exception as e:
             logger.error(f"Generic error on forwarding for watcher {watcher_id}: {e}")
-
-def evaluate_filters(message, text_content, filters):
-    """Helper function to evaluate all filters and return a decision."""
-    # (Esta es la lógica de filtros que ya teníamos, ahora en su propia función por limpieza)
-    if not filters:
-        return True, None
-
-    exclude_keywords = [f['filter_value'] for f in filters if f['filter_type'] == 'keyword_exclude']
-    if any(word.lower() in text_content.lower() for word in exclude_keywords):
-        return False, None
-
-    include_keywords = [f['filter_value'] for f in filters if f['filter_type'] == 'keyword_include']
-    content_filters = [f['filter_value'] for f in filters if f['filter_type'] == 'content_type']
-
-    if not include_keywords and not content_filters:
-        return True, None
-
-    if any(word.lower() in text_content.lower() for word in include_keywords):
-        return True, None
-        
-    if content_filters:
-        if 'solana_ca' in content_filters:
-            for word in text_content.replace('\n', ' ').split(' '):
-                try:
-                    if len(base58.b58decode(word)) == 32:
-                        return True, word
-                except Exception: continue
-        # ... (resto de content filters) ...
-    
-    return False, None
 
 
 def main() -> None:
