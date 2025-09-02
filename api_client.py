@@ -82,40 +82,77 @@ def get_token_data(token_address: str) -> tuple[dict | None, dict | None, str | 
     except Exception as e:
         return None, None, f"An unexpected error occurred: {e}"
 
-def format_token_analysis(pair_data: dict, base_token_info: dict, error_message: str = None) -> str:
+def format_token_analysis(pair_data: dict, error_message: str = None) -> str:
     """
-    Formats data into a full or "Lite" analysis message for Telegram.
+    Takes raw pair data and formats it into a robust message,
+    gracefully handling missing data fields.
     """
-    # CASO 1: No tenemos ni siquiera la información básica del token
-    if not base_token_info:
-        return f"⚠️ <b>Analysis Failed:</b>\n<i>{error_message or 'Token not found.'}</i>"
-
-    # CASO 2: Tenemos info básica, pero no datos de mercado (Análisis "Lite")
+    if error_message:
+        return f"⚠️ <b>Analysis Failed:</b>\n<i>{error_message}</i>"
     if not pair_data:
-        message = (
-            f"<b>{base_token_info.get('name')}</b> (<code>${base_token_info.get('symbol')}</code>)\n\n"
-            f"⚠️ <b>No Market Data Found:</b>\n"
-            f"<i>{error_message or 'This token currently has no active or sufficient liquidity on tracked exchanges.'}</i>\n\n"
-            
-            f"🔗 <b><u>Associated Links:</u></b>\n"
-            f"<a href='https://solscan.io/token/{base_token_info.get('address')}'>Solscan</a> | "
-            f"<a href='https://rugcheck.xyz/tokens/{base_token_info.get('address')}'>RugCheck</a>"
-        )
-        return message
+        return "⚠️ <b>Analysis Failed:</b>\n<i>Could not retrieve token data.</i>"
 
-    # CASO 3: Tenemos todo (Análisis Completo)
+    # --- INICIO DE LA MODIFICACIÓN: Extracción Segura de Datos ---
+    
+    base_token = pair_data.get('baseToken', {})
     quote_token = pair_data.get('quoteToken', {})
-    price_usd = pair_data.get('priceUsd')
-    price_native = pair_data.get('priceNative')
-    market_cap = pair_data.get('fdv')
+    
+    # Use .get() with a default value of None for all optional fields
+    price_usd_str = pair_data.get('priceUsd')
+    price_native_str = pair_data.get('priceNative')
+    market_cap = pair_data.get('fdv') # fdv is the market cap
     volume_24h = pair_data.get('volume', {}).get('h24')
-    price_change_24h = pair_data.get('priceChange', {}).get('h24', 0)
+    price_change_24h = pair_data.get('priceChange', {}).get('h24')
+
+    # --- FIN DE LA MODIFICACIÓN ---
+
+    # --- Construcción del Mensaje Dinámico ---
     
-    change_symbol = "📈" if price_change_24h >= 0 else "📉"
+    message_lines = []
     
-    message = (
-        f"<b>{base_token_info.get('name')}</b> (<code>${base_token_info.get('symbol')}</code>)\n\n"
-        f"<b>Price:</b> <code>${price_usd}</code> ({change_symbol} {price_change_24h}%)\n"
-        # ... (resto del mensaje completo, sin cambios)
-    )
-    return message
+    # Header (siempre presente)
+    message_lines.append(f"<b>{base_token.get('name', 'Unknown Token')}</b> (<code>${base_token.get('symbol', 'N/A')}</code>)")
+    message_lines.append("") # Salto de línea
+
+    # Price (casi siempre presente)
+    if price_usd_str:
+        price_usd = float(price_usd_str)
+        change_line = ""
+        if price_change_24h is not None:
+            change_symbol = "📈" if price_change_24h >= 0 else "📉"
+            change_line = f"({change_symbol} {price_change_24h}%)"
+        message_lines.append(f"<b>Price:</b> <code>${price_usd:,.8f}</code> {change_line}")
+
+    if price_native_str:
+        price_native = float(price_native_str)
+        message_lines.append(f"<b>Value:</b> <code>{price_native:,.6f} ${quote_token.get('symbol', 'N/A')}</code>")
+    
+    # Statistics Section (solo si hay datos que mostrar)
+    stats_lines = []
+    if market_cap:
+        stats_lines.append(f"<b>Market Cap:</b> <code>${format_large_number(market_cap)}</code>")
+    if volume_24h:
+        stats_lines.append(f"<b>24h Volume:</b> <code>${format_large_number(volume_24h)}</code>")
+    
+    if stats_lines:
+        message_lines.append("")
+        message_lines.append(f"📊 <b><u>Statistics:</u></b>")
+        message_lines.extend(stats_lines)
+
+    # Associated Links (siempre presente)
+    message_lines.append("")
+    message_lines.append(f"🔗 <b><u>Associated Links:</u></b>")
+    links = []
+    if pair_data.get('url'):
+        links.append(f"<a href='{pair_data.get('url')}'>DexScreener</a>")
+    if base_token.get('address'):
+        links.append(f"<a href='https://solscan.io/token/{base_token.get('address')}'>Solscan</a>")
+        links.append(f"<a href='https://rugcheck.xyz/tokens/{base_token.get('address')}'>RugCheck</a>")
+    message_lines.append(" | ".join(links))
+
+    # Security Analysis (siempre presente, pero con mensaje genérico)
+    message_lines.append("")
+    message_lines.append(f"🛡️ <b><u>Security Analysis:</u></b>")
+    message_lines.append(f"<i>Security data not available via DexScreener.</i>")
+
+    return "\n".join(message_lines)
