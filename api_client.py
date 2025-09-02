@@ -85,24 +85,44 @@ def get_token_data(token_address: str) -> tuple[dict | None, dict | None, str | 
 def format_token_analysis(pair_data: dict, error_message: str = None) -> str:
     """
     Takes raw pair data and formats it into a robust message,
-    gracefully handling missing data fields.
+    gracefully handling missing or malformed data fields.
     """
     if error_message:
         return f"⚠️ <b>Analysis Failed:</b>\n<i>{error_message}</i>"
     if not pair_data:
         return "⚠️ <b>Analysis Failed:</b>\n<i>Could not retrieve token data.</i>"
 
-    # --- INICIO DE LA MODIFICACIÓN: Extracción Segura de Datos ---
-    
     base_token = pair_data.get('baseToken', {})
     quote_token = pair_data.get('quoteToken', {})
     
-    # Use .get() with a default value of None for all optional fields
-    price_usd_str = pair_data.get('priceUsd')
-    price_native_str = pair_data.get('priceNative')
-    market_cap = pair_data.get('fdv') # fdv is the market cap
-    volume_24h = pair_data.get('volume', {}).get('h24')
-    price_change_24h = pair_data.get('priceChange', {}).get('h24')
+    # --- INICIO DE LA MODIFICACIÓN: Extracción y Validación Segura ---
+    
+    # Extraemos los datos y nos aseguramos de que sean del tipo correcto.
+    # Si no, les asignamos None para que sean manejados más adelante.
+    try:
+        price_usd = float(pair_data.get('priceUsd')) if pair_data.get('priceUsd') is not None else None
+    except (ValueError, TypeError):
+        price_usd = None
+        
+    try:
+        price_native = float(pair_data.get('priceNative')) if pair_data.get('priceNative') is not None else None
+    except (ValueError, TypeError):
+        price_native = None
+        
+    try:
+        market_cap = float(pair_data.get('fdv')) if pair_data.get('fdv') is not None else None
+    except (ValueError, TypeError):
+        market_cap = None
+        
+    try:
+        volume_24h = float(pair_data.get('volume', {}).get('h24')) if pair_data.get('volume', {}).get('h24') is not None else None
+    except (ValueError, TypeError):
+        volume_24h = None
+        
+    try:
+        price_change_24h = float(pair_data.get('priceChange', {}).get('h24')) if pair_data.get('priceChange', {}).get('h24') is not None else None
+    except (ValueError, TypeError):
+        price_change_24h = None
 
     # --- FIN DE LA MODIFICACIÓN ---
 
@@ -110,28 +130,26 @@ def format_token_analysis(pair_data: dict, error_message: str = None) -> str:
     
     message_lines = []
     
-    # Header (siempre presente)
+    # Header
     message_lines.append(f"<b>{base_token.get('name', 'Unknown Token')}</b> (<code>${base_token.get('symbol', 'N/A')}</code>)")
-    message_lines.append("") # Salto de línea
+    message_lines.append("")
 
-    # Price (casi siempre presente)
-    if price_usd_str:
-        price_usd = float(price_usd_str)
+    # Price
+    if price_usd is not None:
         change_line = ""
         if price_change_24h is not None:
             change_symbol = "📈" if price_change_24h >= 0 else "📉"
             change_line = f"({change_symbol} {price_change_24h}%)"
         message_lines.append(f"<b>Price:</b> <code>${price_usd:,.8f}</code> {change_line}")
 
-    if price_native_str:
-        price_native = float(price_native_str)
+    if price_native is not None:
         message_lines.append(f"<b>Value:</b> <code>{price_native:,.6f} ${quote_token.get('symbol', 'N/A')}</code>")
     
-    # Statistics Section (solo si hay datos que mostrar)
+    # Statistics Section
     stats_lines = []
-    if market_cap:
+    if market_cap is not None:
         stats_lines.append(f"<b>Market Cap:</b> <code>${format_large_number(market_cap)}</code>")
-    if volume_24h:
+    if volume_24h is not None:
         stats_lines.append(f"<b>24h Volume:</b> <code>${format_large_number(volume_24h)}</code>")
     
     if stats_lines:
@@ -139,7 +157,7 @@ def format_token_analysis(pair_data: dict, error_message: str = None) -> str:
         message_lines.append(f"📊 <b><u>Statistics:</u></b>")
         message_lines.extend(stats_lines)
 
-    # Associated Links (siempre presente)
+    # Associated Links
     message_lines.append("")
     message_lines.append(f"🔗 <b><u>Associated Links:</u></b>")
     links = []
@@ -150,7 +168,7 @@ def format_token_analysis(pair_data: dict, error_message: str = None) -> str:
         links.append(f"<a href='https://rugcheck.xyz/tokens/{base_token.get('address')}'>RugCheck</a>")
     message_lines.append(" | ".join(links))
 
-    # Security Analysis (siempre presente, pero con mensaje genérico)
+    # Security Analysis
     message_lines.append("")
     message_lines.append(f"🛡️ <b><u>Security Analysis:</u></b>")
     message_lines.append(f"<i>Security data not available via DexScreener.</i>")
