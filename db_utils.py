@@ -27,7 +27,6 @@ def create_tables():
     )
     """)
     
-    # --- NUEVA TABLA PARA FILTROS ---
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS filters (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,7 +41,6 @@ def create_tables():
     conn.close()
     print("✅ Base de datos con filtros lista.")
 
-# --- Funciones de Configuración de Usuario (sin cambios) ---
 def set_user_destination(user_id: int, destination_chat_id: str):
     conn = get_db_connection()
     conn.execute(
@@ -59,7 +57,6 @@ def get_user_destination(user_id: int) -> str | None:
     conn.close()
     return row['destination_chat_id'] if row else None
 
-# --- Funciones de Vigilancia (con una nueva función) ---
 def add_watched_target(watcher_user_id: int, source_group_id: str, target_user_id: int, target_username: str) -> bool:
     try:
         conn = get_db_connection()
@@ -84,22 +81,18 @@ def remove_watched_target_by_id(target_id: int) -> bool:
 
 def get_user_watched_targets(watcher_user_id: int) -> list:
     conn = get_db_connection()
-    # Obtenemos el ID del objetivo, que es crucial para los filtros
     targets = conn.execute("SELECT id, source_group_id, target_user_id, target_username FROM watched_targets WHERE watcher_user_id = ?", (watcher_user_id,)).fetchall()
     conn.close()
     return targets
 
 def find_watchers_for_target(source_group_id: str, target_user_id: int) -> list:
     conn = get_db_connection()
-    # Devolvemos más información: el ID del objetivo y el ID del vigilante
     watchers = conn.execute(
         "SELECT id, watcher_user_id FROM watched_targets WHERE source_group_id = ? AND target_user_id = ?",
         (source_group_id, str(target_user_id))
     ).fetchall()
     conn.close()
     return watchers
-
-# --- NUEVAS FUNCIONES PARA GESTIONAR FILTROS ---
 
 def add_filter(target_id: int, filter_type: str, filter_value: str):
     conn = get_db_connection()
