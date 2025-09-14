@@ -455,6 +455,90 @@ async def group_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
         except Exception as e:
             logger.error(f"Generic error on forwarding for watcher {watcher_id}: {e}")
 
+def evaluate_filters(message: Update.message, text_content: str, filters: list) -> (bool, str | None):
+    """
+    Evalúa un mensaje contra una lista de filtros.
+    Retorna (True, ca_encontrada) si el mensaje debe ser enviado, o (False, None) si no.
+    """
+    if not filters:
+        # Si no hay filtros, siempre se envía.
+        # Comprobamos si hay CA de Solana para el análisis.
+        solana_ca = find_solana_ca(text_content)
+        return True, solana_ca
+
+    # Organizar filtros por tipo para una lógica más clara
+    include_keywords = [f['filter_value'] for f in filters if f['filter_type'] == 'keyword_include']
+    exclude_keywords = [f['filter_value'] for f in filters if f['filter_type'] == 'keyword_exclude']
+    content_types = [f['filter_value'] for f in filters if f['filter_type'] == 'content_type']
+
+    text_lower = text_content.lower()
+
+    # 1. Comprobación de palabras clave a excluir
+    if any(keyword in text_lower for keyword in exclude_keywords):
+        return False, None
+
+    # 2. Comprobación de palabras clave a incluir
+    # Si existen filtros de inclusión, al menos uno debe cumplirse.
+    if include_keywords and not any(keyword in text_lower for keyword in include_keywords):
+        return False, None
+
+    # 3. Comprobación de tipo de contenido
+    found_solana_ca = None
+    if content_types:
+        content_match = False
+        for ctype in content_types:
+            if ctype == 'image' and message.photo: content_match = True; break
+            if ctype == 'video' and message.video: content_match = True; break
+            if ctype == 'link' and message.entities and any(e.type in ['url', 'text_link'] for e in message.entities): content_match = True; break
+            if ctype == 'text_only' and message.text and not message.photo and not message.video and not message.document: content_match = True; break
+            
+            # Lógica para CA
+            ca = find_solana_ca(text_content)
+            if ctype == 'solana_ca' and ca:
+                found_solana_ca = ca
+                content_match = True
+                break
+            
+            # Puedes añadir más lógicas de CA aquí si quieres
+            if ctype == 'contract_address' and (ca or find_eth_ca(text_content)):
+                found_solana_ca = ca # Priorizamos Solana para el análisis
+                content_match = True
+                break
+        
+        # Si hay filtros de contenido y ninguno coincide, no se envía.
+        if not content_match:
+            return False, None
+
+    # Si pasa todos los filtros, comprobamos si hay una CA de Solana para el análisis
+    if not found_solana_ca:
+        found_solana_ca = find_solana_ca(text_content)
+        
+    return True, found_solana_ca
+
+
+def find_solana_ca(text: str) -> str | None:
+    """Encuentra una dirección de contrato de Solana válida en un texto."""
+    # Expresión regular para encontrar strings alfanuméricos de 32 a 44 caracteres
+    # que son típicos de las direcciones de Solana.
+    solana_pattern = r'\b[1-9A-HJ-NP-Za-km-z]{32,44}\b'
+    matches = re.findall(solana_pattern, text)
+    for match in matches:
+        try:
+            # Intenta decodificar en base58. Si funciona, es una CA válida.
+            base58.b58decode(match)
+            # Evita falsos positivos comunes
+            if len(match) > 30 and not match.lower().startswith("http"):
+                return match
+        except Exception:
+            continue
+    return None
+
+def find_eth_ca(text: str) -> str | None:
+    """Encuentra una dirección de contrato de Ethereum/EVM."""
+    eth_pattern = r'\b0x[a-fA-F0-9]{40}\b'
+    match = re.search(eth_pattern, text)
+    return match.group(0) if match else None
+
 
 def main() -> None:
     """Run the bot."""
